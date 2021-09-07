@@ -189,7 +189,6 @@ def transfer_AL(opt):
                                    tol = opt['tol'], verbose=opt['verbose'])
         acc.append(test_acc)
         print('data size {}: acc {}'.format(label_status.sum(), test_acc))
-        print('{} remaining'.format(len(label_seq)))
 
     return acc
 
