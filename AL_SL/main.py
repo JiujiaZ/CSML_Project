@@ -8,6 +8,7 @@ from tools import get_mnist_data
 
 
 def train_data_update(model, x_train, label_status, device, n=1, strategy = 'random'):
+    # for active learning and random sampling
     p = 1 - label_status   # revert original one means label avaliable
     p = p/p.sum()
     if (strategy == 'random'):
@@ -25,6 +26,12 @@ def train_data_update(model, x_train, label_status, device, n=1, strategy = 'ran
 
     label_status[new_idx] = 1
     return label_status, new_idx
+
+def transfer_update(label_status, label_seq):
+    new_idx = int(label_seq.pop(0))
+    label_status[new_idx] = 1
+    return label_status, label_seq
+
 
 def select_model(opt):
     if (opt['model'] == 'CNN'):
@@ -137,4 +144,52 @@ def al_procedure(opt):
         indx_hist.append(new_idx)
 
     return (acc,indx_hist)
+
+
+def transfer_AL(opt):
+    np.random.seed(opt['seed'])
+    torch.manual_seed(opt['seed'])
+
+    def get_name(opt):
+        return opt['model_A'] + '_seed' + str(opt['seed']) + '_' + opt['AL_strategy']
+
+    # get data
+    if (opt['data_set']=='MNIST'):
+        x_train, y_train, label_status, x_test, y_test = get_mnist_data(opt['dataset_path'], n_label=0, flatten=False,
+                                                                             one_hot=False)
+    else:
+        raise ValueError('Dataset not implemented')
+
+    acc = list()
+
+    print('transfer labels from CNN to {}'.format(opt['model']))
+    print(opt['AL_strategy'], ' in process...')
+
+    file_name = opt['data_path'] + get_name(opt) + '.npy'
+    temp = list()
+    label_seq = list()
+    with open(file_name, 'rb') as f:
+        temp.append(np.load(f))
+        label_seq.append(np.load(f, allow_pickle=True))
+
+    label_seq = list(label_seq[0])
+
+    for i in range(len(label_seq)):
+        label_status, label_seq = transfer_update(label_status, label_seq)
+
+        train_loader = DataLoader(list(zip(x_train[label_status == 1], y_train[label_status == 1])),
+                                  shuffle=True, batch_size=opt['batch_size'] )
+        test_loader = DataLoader(list(zip(x_test, y_test)), shuffle=True, batch_size=int(len(x_test)))
+
+
+        m = select_model(opt).to(opt['device'])
+        optim = torch.optim.Adam(m.parameters(), lr=opt['lr'])
+        train_ls, test_acc = train(m, optim, opt['epochs'], train_loader, test_loader, opt['device'],
+                                   train_size = label_status.sum(), early_epoch=opt['early_epoch'],
+                                   tol = opt['tol'], verbose=opt['verbose'])
+        acc.append(test_acc)
+        print('data size {}: acc {}'.format(label_status.sum(), test_acc))
+        print('{} remaining'.format(len(label_seq)))
+
+    return acc
 
