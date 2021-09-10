@@ -291,7 +291,7 @@ def BenchMarkClassifierMain(opt):
                                                  sampler=get_sampler(test_data.targets))
 
     #opt['alpha'] = opt['alpha'] * (len(unlabelled) + len(labelled)) / len(labelled)
-    opt['alpha'] = opt['alpha'] * opt['labels_per_class'] * 10
+    opt['alpha'] = opt['alpha_coef'] * opt['labels_per_class'] * 10
 
     opt['classifier'] = 'additional'
     model1 = ConditionalVAE(opt).to(opt['device'])
