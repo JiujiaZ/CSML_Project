@@ -393,7 +393,7 @@ def ActiveLearningMain(opt, inter_save = True):
 
     for AL_cycle in range(0, opt['Al_cycle'] + 1):
         print('AL_cycle: {}, trainning size: {:.0f}'.format(AL_cycle, label_status.sum()))
-        opt['alpha'] = 0.1 * label_status.sum()
+        opt['alpha'] = opt['alpha_coef'] * label_status.sum()
         start = timeit.default_timer()
         for epoch in range(1, opt['epochs'] + 1):
             train_l, train_acc = SemiSupervisedTrain(model, labelled, unlabelled, optimizer, epoch, opt, speedy=True)
@@ -430,6 +430,129 @@ def ActiveLearningMain(opt, inter_save = True):
         if (AL_cycle != opt['Al_cycle']):
             model = ConditionalVAE(opt).to(opt['device'])
             optimizer = optim.Adam(model.parameters(), lr=opt['lr'])
+
+    return test_accuracy, label_seq, model
+
+
+def LazyALMain(opt, inter_save = True):
+    # no initialisation at each AL cycle
+    # doesnt work as previous parameters are screwed for current datset
+    np.random.seed(opt['seed'])
+    torch.manual_seed(opt['seed'])
+
+    def get_drop_last(n, bs):
+        if (n % bs == 1): # due to normalisation
+            return True
+        else:
+            return False
+
+    if opt['data_set'][-5:] == 'MNIST':
+        train_data = torchvision.datasets.MNIST(opt['dataset_path'], train=True, download=True,
+                                                transform=torchvision.transforms.ToTensor())
+        test_data = torchvision.datasets.MNIST(opt['dataset_path'], train=False, download=True,
+                                               transform=torchvision.transforms.ToTensor())
+
+        if opt['data_set'] == 'binary_MNIST':
+            print('binary MNIST')
+            opt['data_type'] = 'binary'
+        else:
+            print('grey MNIST')
+            opt['data_type'] = 'grey'
+
+        # initial indices:
+        sampler = get_sampler(train_data.targets, opt['labels_per_class'])
+        label_status = np.zeros(len(train_data))
+        label_status[sampler.indices] = 1
+
+        opt['drop_last'] = get_drop_last(label_status.sum(), opt['batch_size'])
+        #labelled = torch.utils.data.DataLoader(list(zip(x_train[label_status == 1], y_train[label_status == 1])),
+        #    batch_size=opt['batch_size'], pin_memory=False, drop_last=opt['drop_last'])
+        labelled = torch.utils.data.DataLoader(train_data, batch_size=opt['batch_size'],
+                                                 pin_memory=False, sampler = sampler)
+        unlabelled = torch.utils.data.DataLoader(train_data, batch_size=opt['batch_size'], pin_memory=False,
+                                                 sampler=get_sampler(train_data.targets))
+        validation = torch.utils.data.DataLoader(test_data, batch_size=opt['validation_batch_size'], pin_memory=False,
+                                                 sampler=get_sampler(test_data.targets))
+
+    model = ConditionalVAE(opt).to(opt['device'])
+    optimizer = optim.Adam(model.parameters(), lr=opt['lr'])
+
+    #train_loss = []
+    test_loss = []
+
+    #train_accuracy = []
+    test_accuracy = []
+
+    label_seq = []
+    label_seq.append(sampler.indices)
+
+    indices = sampler.indices
+
+    for AL_cycle in range(0, opt['Al_cycle'] + 1):
+        print('AL_cycle: {}, trainning size: {:.0f}'.format(AL_cycle, label_status.sum()))
+        opt['alpha'] = opt['alpha_coef'] * label_status.sum()
+        start = timeit.default_timer()
+
+        if (AL_cycle == 0):
+            for epoch in range(1, opt['ini_epochs'] + 1):
+                train_l, train_acc = SemiSupervisedTrain(model, labelled, unlabelled, optimizer, epoch, opt, speedy=True)
+
+                if (epoch == opt['ini_epochs']):
+                    test_l, test_acc = Test(model, validation, opt)
+                    test_loss.append(test_l)
+                    test_accuracy.append(test_acc)
+                    end = timeit.default_timer()
+                    print('train time: ', (end - start) / 60)
+        else:
+            for epoch in range(1, opt['epochs'] + 1):
+                train_l, train_acc = SemiSupervisedTrain(model, labelled, unlabelled, optimizer, epoch, opt,
+                                                         speedy=True)
+
+                if (epoch == opt['epochs']) and (not np.isnan(train_l)):
+                    test_l, test_acc = Test(model, validation, opt)
+                    test_loss.append(test_l)
+                    test_accuracy.append(test_acc)
+                    end = timeit.default_timer()
+                    print('train time: ', (end - start) / 60)
+
+            # re train - if lazy update is not good
+            if (np.isnan(train_l)):
+                print('AL_cycle {} : model re-initialised'.format(AL_cycle))
+                model = ConditionalVAE(opt).to(opt['device'])
+                optimizer = optim.Adam(model.parameters(), lr=opt['lr'])
+
+                for epoch in range(1, opt['ini_epochs'] + 1):
+                    train_l, train_acc = SemiSupervisedTrain(model, labelled, unlabelled, optimizer, epoch, opt,
+                                                             speedy=True)
+                    if (epoch == opt['ini_epochs']):
+                        test_l, test_acc = Test(model, validation, opt)
+                        test_loss.append(test_l)
+                        test_accuracy.append(test_acc)
+                        end = timeit.default_timer()
+                        print('train time: ', (end - start) / 60)
+
+
+
+            #train_loss.append(train_l)
+            #train_accuracy.append(train_acc)
+
+        # update labelling pools for next training:
+        label_status, new_idx = AL_update(model, train_data, label_status, opt['device'], n=opt['AL_n'], strategy=opt['AL_strategy'])
+        opt['drop_last'] = get_drop_last(label_status.sum(), opt['batch_size'])
+        #labelled = torch.utils.data.DataLoader(list(zip(x_train[label_status == 1], y_train[label_status == 1])),
+        #                                       batch_size=opt['batch_size'], pin_memory=False, drop_last=opt['drop_last'])
+        label_seq.append(new_idx)
+        indices = np.append(indices, new_idx)
+        labelled = torch.utils.data.DataLoader(train_data, batch_size=opt['batch_size'],
+                                               pin_memory=False, drop_last=opt['drop_last'],
+                                               sampler=SubsetRandomSampler(indices))
+
+        #save intermediate results
+        #if (inter_save and ((AL_cycle % 10) == 0)):
+        if inter_save:
+            with open(opt['save_path'] + 'inter_' + opt['AL_strategy']+'.npy', 'wb') as f:
+                np.save(f, test_accuracy)
+                np.save(f, label_seq)
 
     return test_accuracy, label_seq, model
 
