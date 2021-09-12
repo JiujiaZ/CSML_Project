@@ -33,8 +33,8 @@ AL_strategies = ['random', 'bald',  'entropy', 'variation_ratio', 'mean_std']
 # select seed and al_strategy:
 indx = int(sys.argv[1])
 
-seed_indx = (indx-1) % len(AL_strategies)
-AL_indx = (indx-1) // len(AL_strategies)
+seed_indx = (indx-1) // len(AL_strategies)
+AL_indx = (indx-1) % len(AL_strategies)
 
 opt['seed']=seeds[seed_indx]
 opt['AL_strategy'] = AL_strategies[AL_indx]
