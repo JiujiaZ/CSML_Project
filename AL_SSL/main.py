@@ -422,7 +422,7 @@ def ActiveLearningMain(opt, inter_save = True):
         #save intermediate results
         #if (inter_save and ((AL_cycle % 10) == 0)):
         if inter_save:
-            with open(opt['save_path'] + 'inter_' + opt['AL_strategy']+'.npy', 'wb') as f:
+            with open(opt['save_path'] + 'inter_' +'_seed'+str(opt['seed']) + opt['AL_strategy']+'.npy', 'wb') as f:
                 np.save(f, test_accuracy)
                 np.save(f, label_seq)
 

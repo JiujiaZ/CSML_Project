@@ -15,8 +15,8 @@ else:
 opt['labels_per_class']=1
 opt['data_set']='binary_MNIST'
 opt['dataset_path']='/home/jiuzhang/Final/save/'
-opt['save_path']='/home/jiuzhang/Final/save/AL'
-opt['epochs'] = 30
+opt['save_path']='/home/jiuzhang/Final/save/AL/'
+opt['epochs'] = 20
 opt['batch_size'] = 16
 opt['classifier_gradient']=True
 opt['validation_batch_size']=1000
